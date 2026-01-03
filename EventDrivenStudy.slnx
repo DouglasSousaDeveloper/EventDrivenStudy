@@ -2,6 +2,9 @@
   <Folder Name="/Docker/">
     <File Path="docker-compose.yml" />
   </Folder>
+  <Folder Name="/Order.Api/">
+    <Project Path="Order.Api/Order.Api.csproj" Id="c896085b-b7ee-4b07-8d45-ccb40696fb86" />
+  </Folder>
   <Folder Name="/Shared/">
     <Project Path="Shared/Shared.csproj" />
   </Folder>
