@@ -1,81 +1,70 @@
 ﻿using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using RabbitMQ.Client;
 using Shared.Events;
+using Shared.Serialization;
 
 namespace Shared.Messaging;
 
 public sealed class RabbitMqPublisher : IRabbitMqPublisher, IAsyncDisposable
 {
-    private readonly RabbitMqOptions _options;
+    private readonly IConfiguration _configuration;
 
     private IConnection? _connection;
     private IChannel? _channel;
+    private string _exchange = default!;
 
-    public RabbitMqPublisher(RabbitMqOptions options)
+    public RabbitMqPublisher(IConfiguration configuration)
     {
-        _options = options;
+        _configuration = configuration;
     }
 
-    /// <summary>
-    /// Inicializa conexão e channel de forma assíncrona.
-    /// Deve ser chamado na inicialização da aplicação.
-    /// </summary>
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         var factory = new ConnectionFactory
         {
-            HostName = _options.Host,
-            Port = _options.Port,
-            UserName = _options.User,
-            Password = _options.Password
+            HostName = _configuration["RabbitMq:Host"],
+            Port = int.Parse(_configuration["RabbitMq:Port"]!),
+            UserName = _configuration["RabbitMq:Username"],
+            Password = _configuration["RabbitMq:Password"]
         };
 
         _connection = await factory.CreateConnectionAsync(cancellationToken);
         _channel = await _connection.CreateChannelAsync();
+
+        _exchange = _configuration["RabbitMq:Exchange"]!;
+
+        await _channel.ExchangeDeclareAsync(
+            _exchange,
+            ExchangeType.Topic,
+            durable: true,
+            autoDelete: false,
+            cancellationToken: cancellationToken);
     }
 
     public async Task PublishAsync<TEvent>(
         TEvent @event,
-        string exchange,
         string routingKey,
         CancellationToken cancellationToken = default)
-        where TEvent : IntegrationEvent
     {
         if (_channel is null)
-            throw new InvalidOperationException(
-                "RabbitMqPublisher não inicializado. Chame InitializeAsync().");
+            throw new InvalidOperationException("RabbitMQ not initialized.");
 
-        // Declara exchange (idempotente)
-        await _channel.ExchangeDeclareAsync(
-            exchange: exchange,
-            type: ExchangeType.Topic,
-            durable: true,
-            autoDelete: false,
-            arguments: null,
-            cancellationToken: cancellationToken);
-
-        var body = JsonSerializer.SerializeToUtf8Bytes(@event);
-        var properties = new BasicProperties
-        {
-            Persistent = true,
-            ContentType = "application/json",
-            ContentEncoding = "utf-8"
-        };
+        var body = @event.Serialize();
 
         await _channel.BasicPublishAsync(
-            exchange: exchange,
+            exchange: _exchange,
             routingKey: routingKey,
-            mandatory: false,
-            basicProperties: properties,
-            body: body);
+            body: body,
+            cancellationToken: cancellationToken);
     }
 
     public async ValueTask DisposeAsync()
     {
         if (_channel is not null)
-            await _channel.DisposeAsync();
+            await _channel.CloseAsync();
 
         if (_connection is not null)
-            await _connection.DisposeAsync();
+            await _connection.CloseAsync();
     }
 }
