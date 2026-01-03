@@ -1,0 +1,148 @@
+version: "3.9"
+
+# =========================
+# SERVICES
+# =========================
+services:
+
+  # -------------------------------------------------
+  # RABBITMQ - EVENT BROKER
+  # -------------------------------------------------
+  rabbitmq:
+    # Imagem oficial do RabbitMQ com painel de administração
+    image: rabbitmq:3.12-management
+
+    # Nome fixo do container (facilita debug e logs)
+    container_name: rabbitmq
+
+    # Portas expostas para o host
+    ports:
+      # Porta usada pelas aplicações (.NET)
+      - "5672:5672"
+
+      # Painel Web de administração
+      - "15672:15672"
+
+    # Variáveis de ambiente para criação do usuário inicial
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+
+    # Volume para persistir filas, exchanges e mensagens
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+    # Healthcheck usado pelo Docker (e futuramente Kubernetes)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    # Rede compartilhada entre os serviços
+    networks:
+      - event-driven-network
+
+  # -------------------------------------------------
+  # ORDER.API - PRODUCER DE EVENTOS
+  # -------------------------------------------------
+  order-api:
+    # Build da imagem a partir do Dockerfile do projeto
+    build:
+      context: ./src/Order.API
+      dockerfile: Dockerfile
+
+    # Nome do container
+    container_name: order-api
+
+    # Porta HTTP da API
+    ports:
+      - "5000:8080"
+
+    # Variáveis de ambiente usadas pela aplicação
+    environment:
+      # ASP.NET
+      ASPNETCORE_ENVIRONMENT: Development
+
+      # String de conexão com o RabbitMQ
+      # IMPORTANTE:
+      # O host NÃO é localhost, é o nome do serviço "rabbitmq"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin
+
+    # Garante que o RabbitMQ suba antes
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+    networks:
+      - event-driven-network
+
+  # -------------------------------------------------
+  # BILLING.WORKER - CONSUMIDOR DE EVENTOS
+  # -------------------------------------------------
+  billing-worker:
+    build:
+      context: ./src/Billing.Worker
+      dockerfile: Dockerfile
+
+    container_name: billing-worker
+
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin
+
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+    networks:
+      - event-driven-network
+
+  # -------------------------------------------------
+  # NOTIFICATION.WORKER - CONSUMIDOR DE EVENTOS
+  # -------------------------------------------------
+  notification-worker:
+    build:
+      context: ./src/Notification.Worker
+      dockerfile: Dockerfile
+
+    container_name: notification-worker
+
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin
+
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+    networks:
+      - event-driven-network
+
+
+# =========================
+# VOLUMES
+# =========================
+volumes:
+  # Volume persistente do RabbitMQ
+  rabbitmq_data:
+
+
+# =========================
+# NETWORKS
+# =========================
+networks:
+  # Rede interna isolada para os serviços
+  event-driven-network:
+    driver: bridge
