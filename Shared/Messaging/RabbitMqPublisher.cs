@@ -1,58 +1,63 @@
-﻿using Shared.Events;
-using System.Text;
-using System.Text.Json;
+﻿using System.Text.Json;
 using RabbitMQ.Client;
+using Shared.Events;
 
 namespace Shared.Messaging;
 
-public sealed class RabbitMqPublisher : IRabbitMqPublisher, IDisposable
+public sealed class RabbitMqPublisher : IRabbitMqPublisher, IAsyncDisposable
 {
-    private readonly IConnection _connection;
-    private readonly IChannel _channel;
+    private readonly RabbitMqOptions _options;
+
+    private IConnection? _connection;
+    private IChannel? _channel;
 
     public RabbitMqPublisher(RabbitMqOptions options)
     {
-        var resultConnection = GetConnectionAndChannel(options).Result;
-        _connection = resultConnection.Item1;
-        _channel = resultConnection.Item2;
+        _options = options;
     }
 
-    public async Task<(IConnection, IChannel)> GetConnectionAndChannel(RabbitMqOptions options)
+    /// <summary>
+    /// Inicializa conexão e channel de forma assíncrona.
+    /// Deve ser chamado na inicialização da aplicação.
+    /// </summary>
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         var factory = new ConnectionFactory
         {
-            HostName = options.Host,
-            Port = options.Port,
-            UserName = options.User,
-            Password = options.Password,
-            VirtualHost = "/",
-            AutomaticRecoveryEnabled = true,
-            NetworkRecoveryInterval = TimeSpan.FromSeconds(10)
+            HostName = _options.Host,
+            Port = _options.Port,
+            UserName = _options.User,
+            Password = _options.Password
         };
 
-        using var connection = await factory.CreateConnectionAsync();
-        using var channel = await connection.CreateChannelAsync();
-
-        return (connection, channel);
+        _connection = await factory.CreateConnectionAsync(cancellationToken);
+        _channel = await _connection.CreateChannelAsync();
     }
 
-    public async Task PublishAsync<TEvent>(TEvent @event, string exchange, string routingKey,
+    public async Task PublishAsync<TEvent>(
+        TEvent @event,
+        string exchange,
+        string routingKey,
         CancellationToken cancellationToken = default)
         where TEvent : IntegrationEvent
     {
+        if (_channel is null)
+            throw new InvalidOperationException(
+                "RabbitMqPublisher não inicializado. Chame InitializeAsync().");
+
         // Declara exchange (idempotente)
         await _channel.ExchangeDeclareAsync(
             exchange: exchange,
             type: ExchangeType.Topic,
-            durable: true);
+            durable: true,
+            autoDelete: false,
+            arguments: null,
+            cancellationToken: cancellationToken);
 
         var body = JsonSerializer.SerializeToUtf8Bytes(@event);
-
         var properties = new BasicProperties
         {
             Persistent = true,
-            MessageId = @event.EventId.ToString(),
-            Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
             ContentType = "application/json",
             ContentEncoding = "utf-8"
         };
@@ -65,9 +70,12 @@ public sealed class RabbitMqPublisher : IRabbitMqPublisher, IDisposable
             body: body);
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _connection.CloseAsync();
-        _channel.CloseAsync();
+        if (_channel is not null)
+            await _channel.DisposeAsync();
+
+        if (_connection is not null)
+            await _connection.DisposeAsync();
     }
 }
