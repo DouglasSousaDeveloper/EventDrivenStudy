@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Billing.Worker/">
+    <Project Path="Billing.Worker/Billing.Worker.csproj" Id="618ee689-ef73-4ca0-93bc-2b35f000c255" />
+  </Folder>
   <Folder Name="/Docker/">
     <File Path="docker-compose.yml" />
   </Folder>
