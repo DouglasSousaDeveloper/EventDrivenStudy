@@ -5,6 +5,9 @@
   <Folder Name="/Docker/">
     <File Path="docker-compose.yml" />
   </Folder>
+  <Folder Name="/Notification.Worker/">
+    <Project Path="Notification.Worker/Notification.Worker.csproj" Id="ca718c84-ee54-45c9-92b8-30c343466e89" />
+  </Folder>
   <Folder Name="/Order.Api/">
     <Project Path="Order.Api/Order.Api.csproj" Id="c896085b-b7ee-4b07-8d45-ccb40696fb86" />
   </Folder>
